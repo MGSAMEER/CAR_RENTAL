@@ -1,0 +1,178 @@
+// MongoDB Prisma Schema for Car Rental SaaS
+// Swap this file into `prisma/schema.prisma` when you are ready to migrate the live app.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                       String    @id @default(uuid()) @map("_id")
+  name                     String
+  email                    String    @unique
+  password                 String?   
+  googleId                 String?   
+  avatar                   String?   
+  authProvider             String    @default("local") 
+  role                     String    @default("user")
+  isBlocked                Boolean   @default(false)
+  isEmailVerified          Boolean   @default(false)
+  emailVerificationToken   String?
+  emailVerificationExpires DateTime?
+  resetPasswordToken       String?
+  resetPasswordExpires     DateTime?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+
+  isDeleted                Boolean   @default(false)
+
+  bookings  Booking[]
+  sessions  Session[]
+  reviews   Review[]
+  driverDoc DriverDocument?
+  auditLogs AuditLog[]
+
+  @@index([role])
+  @@index([isDeleted])
+  @@map("users")
+}
+
+model Car {
+  id           String    @id @default(uuid()) @map("_id")
+  name         String
+  brand        String
+  model        String
+  type         String
+  pricePerDay  Float
+  availability Boolean   @default(true)
+  imageUrl     String?
+  description  String?
+  seats        Int       @default(5)
+  transmission String    @default("manual")
+  fuelType     String    @default("petrol")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  ratingAvg    Float?
+  reviewCount  Int       @default(0)
+
+  isDeleted    Boolean   @default(false)
+
+  branchId     String?
+  branch       Branch?   @relation(fields: [branchId], references: [id])
+
+  bookings     Booking[]
+  reviews      Review[]
+
+  @@index([availability])
+  @@index([type])
+  @@index([isDeleted])
+  @@map("cars")
+}
+
+model Branch {
+  id            String   @id @default(uuid()) @map("_id")
+  name          String
+  address       String
+  city          String
+  latitude      Float
+  longitude     Float
+  contactNumber String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  isDeleted     Boolean  @default(false)
+
+  cars          Car[]
+
+  @@index([city])
+  @@index([isDeleted])
+  @@map("branches")
+}
+
+model Booking {
+  id        String    @id @default(uuid()) @map("_id")
+  userId    String
+  carId     String
+  startDate DateTime
+  endDate   DateTime
+  totalCost      Float
+  status         String    @default("confirmed")
+  paymentStatus  String?   @default("pending")
+  stripeIntentId String?   
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  isDeleted      Boolean   @default(false)
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  car       Car       @relation(fields: [carId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([paymentStatus])
+  @@index([startDate, endDate])
+  @@index([isDeleted])
+  @@map("bookings")
+}
+
+model Session {
+  id           String   @id @default(uuid()) @map("_id")
+  userId       String
+  refreshToken String
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model Review {
+  id        String   @id @default(uuid()) @map("_id")
+  rating    Int
+  comment   String?
+  carId     String
+  userId    String
+  createdAt DateTime @default(now())
+
+  car       Car      @relation(fields: [carId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, carId]) 
+  @@map("reviews")
+}
+
+model DriverDocument {
+  id                 String   @id @default(uuid()) @map("_id")
+  userId             String   @unique
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  licenseNumber      String
+  licenseExpiry      DateTime
+  documentUrl        String
+  verificationStatus String   @default("pending") 
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@map("driver_documents")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid()) @map("_id")
+  adminId   String
+  action    String   
+  entity    String   
+  entityId  String
+  details   Json?
+  createdAt DateTime @default(now())
+
+  admin     User     @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@index([adminId])
+  @@index([entity, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
