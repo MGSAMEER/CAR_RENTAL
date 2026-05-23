@@ -131,12 +131,12 @@ Development: http://localhost:3000 (dev only)
 # Stripe Secret API Key (LIVE MODE - for production)
 # Get from: Stripe Dashboard → Developers → API Keys → Live Mode
 # Key starts with: sk_live_
-STRIPE_SECRET_KEY=sk_live_51YOUR_PRODUCTION_KEY_STRING_HERE_DO_NOT_USE_TEST_KEY
+STRIPE_SECRET_KEY=YOUR_STRIPE_LIVE_SECRET_KEY
 
 # Stripe Webhook Signing Secret (for webhook verification)
 # Get from: Stripe Dashboard → Developers → Webhooks → Signing secret
 # Secret starts with: whsec_
-STRIPE_WEBHOOK_SECRET=whsec_1YOUR_WEBHOOK_SIGNING_SECRET_HERE
+STRIPE_WEBHOOK_SECRET=YOUR_STRIPE_WEBHOOK_SECRET
 ```
 
 **Critical Notes:**
@@ -188,7 +188,7 @@ SMTP_SECURE=false
 # Email: Your Brevo account email
 # Password: Brevo API Key (starts with xsmtpsib-) - NOT your password
 SMTP_USER=your-email@brevo.com
-SMTP_PASS=xsmtpsib-0000111122223333444455556666777788889999aaaaabbbbccccdd
+SMTP_PASS=YOUR_BREVO_SMTP_API_KEY
 
 # Sender email configuration
 # Name and email address for "From" field
@@ -479,3 +479,4 @@ For critical variables (JWT_SECRET, STRIPE_KEY):
 **Template Version**: 1.0  
 **Last Updated**: May 23, 2026  
 **Status**: Ready for Production
+

@@ -1,75 +1,61 @@
-# Render Configuration File
-# Location: ./render.yaml
-# 
-# This file defines the complete infrastructure for deploying the car rental
-# SaaS backend to Render. It follows Infrastructure-as-Code principles.
-#
-# Usage:
-# 1. Push this file to your GitHub repository
-# 2. Link repo in Render Dashboard
-# 3. Render automatically detects this file for deployment
-#
-# Documentation: https://render.com/docs/infrastructure-as-code
+# Render Blueprint for the backend service in this monorepo.
+# Repository root contains frontend/ and backend/.
+# Render must use backend/ as the service root so it installs backend/package.json.
 
 services:
   - type: web
     name: car-rental-backend
     runtime: node
-    startCommand: cd backend && npm start
-    buildCommand: cd backend && npm ci && npm run db:generate
-    
-    # Instance Configuration
+    rootDir: backend
+    branch: main
+    autoDeploy: true
     plan: standard
-    region: frankfurt  # eu-central-1 (change to closest region)
-    
-    # Deployment Settings
-    autoDeploy: true  # Auto-deploy on git push
-    branch: main      # Deploy from main branch
-    
-    # Health Check Configuration
+    region: frankfurt
+
+    # Commands run from rootDir, so do not prefix these with "cd backend".
+    buildCommand: npm ci && npm run db:generate
+    startCommand: npm start
+
     healthCheckPath: /health
-    healthCheckInterval: 30
-    healthCheckTimeout: 10
-    
-    # Environment Variables
+
     envVars:
-      # Core Configuration
+      # Core
       - key: NODE_ENV
         value: production
       - key: PORT
         value: "5000"
       - key: LOG_LEVEL
         value: info
-      
-      # Database (MongoDB Atlas)
+
+      # Database
       - key: DATABASE_URL
-        sync: false  # Sync from Dashboard environment variable
-      
-      # JWT Authentication
+        sync: false
+
+      # Auth
       - key: JWT_SECRET
         sync: false
       - key: JWT_REFRESH_SECRET
         sync: false
-      
-      # CORS & Client URLs
+
+      # Frontend/CORS
       - key: CLIENT_URL
         sync: false
-      
-      # Stripe Payment Processing
+
+      # Stripe. Keep webhook endpoint at /api/v1/payments/webhook.
       - key: STRIPE_SECRET_KEY
         sync: false
       - key: STRIPE_WEBHOOK_SECRET
         sync: false
-      
-      # Cloudinary (File Storage)
+
+      # Cloudinary
       - key: CLOUDINARY_CLOUD_NAME
         sync: false
       - key: CLOUDINARY_API_KEY
         sync: false
       - key: CLOUDINARY_API_SECRET
         sync: false
-      
-      # Brevo SMTP (Email)
+
+      # Brevo SMTP
       - key: SMTP_HOST
         value: smtp-relay.brevo.com
       - key: SMTP_PORT
@@ -82,92 +68,7 @@ services:
         sync: false
       - key: SMTP_FROM
         sync: false
-      
+
       # Google OAuth
       - key: GOOGLE_CLIENT_ID
         sync: false
-    
-    # Scaling Configuration
-    scaling:
-      minInstances: 1    # Minimum 1 instance
-      maxInstances: 3    # Maximum 3 instances (under high load)
-      targetCpuUtilization: 60
-      targetMemoryUtilization: 70
-    
-    # Build Configuration
-    buildEnv:
-      - key: NODE_ENV
-        value: production
-    
-    # Root Directory (if backend is in subdirectory)
-    rootDir: backend
-    
-    # Deployment Timeout
-    timeout: 300  # 5 minutes
-
-  # Optional: Redis Cache Service
-  - type: redis
-    name: car-rental-redis
-    plan: free
-    region: frankfurt
-    # This provides Redis for session storage and caching
-
-databases:
-  # MongoDB Atlas is managed externally, but you can configure other DBs here
-  # Example: PostgreSQL, MySQL would be configured here
-  # For MongoDB: Use MongoDB Atlas connection string in DATABASE_URL env var
-
-# Deployment Policies
-deployPolicies:
-  - type: limits
-    maxConcurrentDeployments: 1
-    preDeployCommand: npm test  # Run tests before deploying (if configured)
-
-# Notifications (Optional)
-notifications:
-  - type: slack
-    webhookUrl: ${SLACK_WEBHOOK_URL}  # Set in Render Dashboard
-    events:
-      - deployment.success
-      - deployment.failed
-      - build.failed
-
----
-
-# Alternative: render-env.yml
-# For managing environment variables separately
-
-# This file defines sensitive variables that should be set in Render Dashboard
-# Do NOT include secrets in version control
-# 
-# To use:
-# 1. Copy this template to Render Dashboard
-# 2. Fill in actual values (marked with CHANGE_ME)
-# 3. Keep this template in repo without actual values
-
-envVariables:
-  DATABASE_URL: "CHANGE_ME: mongodb+srv://user:password@cluster.mongodb.net/database"
-  JWT_SECRET: "CHANGE_ME: generate-with-'node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\"'"
-  JWT_REFRESH_SECRET: "CHANGE_ME: same as above"
-  CLIENT_URL: "CHANGE_ME: https://yourdomain.com"
-  STRIPE_SECRET_KEY: "CHANGE_ME: sk_live_xxx (from Stripe Dashboard)"
-  STRIPE_WEBHOOK_SECRET: "CHANGE_ME: whsec_xxx (from Stripe Dashboard)"
-  CLOUDINARY_CLOUD_NAME: "CHANGE_ME: your cloud name"
-  CLOUDINARY_API_KEY: "CHANGE_ME: your API key"
-  CLOUDINARY_API_SECRET: "CHANGE_ME: your API secret"
-  SMTP_USER: "CHANGE_ME: your-email@brevo.com"
-  SMTP_PASS: "CHANGE_ME: xsmtpsib-xxx (your Brevo API key)"
-  SMTP_FROM: "CHANGE_ME: DriveEasy <noreply@yourdomain.com>"
-  GOOGLE_CLIENT_ID: "CHANGE_ME: xxx.apps.googleusercontent.com"
-
-secrets:
-  # Secrets should NEVER be in git
-  # Set these only in Render Dashboard → Environment
-  - DATABASE_URL
-  - JWT_SECRET
-  - JWT_REFRESH_SECRET
-  - STRIPE_SECRET_KEY
-  - STRIPE_WEBHOOK_SECRET
-  - CLOUDINARY_API_KEY
-  - CLOUDINARY_API_SECRET
-  - SMTP_PASS

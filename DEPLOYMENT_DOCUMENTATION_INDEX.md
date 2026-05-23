@@ -287,7 +287,7 @@ curl https://api-url/health
 mongosh "connection-string" <<< "db.admin.ping()"
 
 # Stripe
-curl https://api.stripe.com/v1/charges -u sk_live_key:
+curl https://api.stripe.com/v1/charges -u YOUR_STRIPE_LIVE_SECRET_KEY:
 
 # Email
 Send test email via API
@@ -449,3 +449,4 @@ This deployment guide was created with attention to security, reliability, scala
 **Last Updated**: May 23, 2026  
 **Deployment Platform**: Render  
 **Environment**: Production
+

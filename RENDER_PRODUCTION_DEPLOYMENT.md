@@ -246,8 +246,8 @@ JWT_REFRESH_SECRET=your-secure-refresh-token-secret-32-chars-change-this
 CLIENT_URL=https://your-frontend-domain.com
 
 # ─────── Stripe Payment Processing ────────────────────────────────
-STRIPE_SECRET_KEY=sk_live_51YOUR_PRODUCTION_KEY_HERE
-STRIPE_WEBHOOK_SECRET=whsec_1YOUR_WEBHOOK_SECRET_HERE
+STRIPE_SECRET_KEY=YOUR_STRIPE_LIVE_SECRET_KEY
+STRIPE_WEBHOOK_SECRET=YOUR_STRIPE_WEBHOOK_SECRET
 
 # ─────── Cloudinary (File Storage) ────────────────────────────────
 CLOUDINARY_CLOUD_NAME=your_cloud_name
@@ -259,7 +259,7 @@ SMTP_HOST=smtp-relay.brevo.com
 SMTP_PORT=587
 SMTP_SECURE=false
 SMTP_USER=your-brevo-email@example.com
-SMTP_PASS=xsmtpsib-YOUR_BREVO_API_KEY_HERE
+SMTP_PASS=YOUR_BREVO_SMTP_API_KEY
 SMTP_FROM=DriveEasy <noreply@yourdomain.com>
 
 # ─────── Google OAuth ──────────────────────────────────────────────
@@ -331,7 +331,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 2. Toggle to **Live Mode** (top-left)
 3. Copy:
    - **Publishable Key**: `pk_live_xxxxx` (safe to expose in frontend)
-   - **Secret Key**: `sk_live_xxxxx` (KEEP SECRET - for backend only)
+   - **Secret Key**: `YOUR_STRIPE_LIVE_SECRET_KEY` (KEEP SECRET - for backend only)
 
 ### 4.3 Configure Stripe Webhook Signing Secret
 
@@ -347,14 +347,14 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
      charge.refunded
      ```
 4. Click **Add endpoint**
-5. Copy **Signing secret**: `whsec_xxxxx`
+5. Copy **Signing secret**: `YOUR_STRIPE_WEBHOOK_SECRET`
 
 ### 4.4 Update Backend Environment Variables
 
 Add to Render:
 ```
-STRIPE_SECRET_KEY=sk_live_xxxxx
-STRIPE_WEBHOOK_SECRET=whsec_xxxxx
+STRIPE_SECRET_KEY=YOUR_STRIPE_LIVE_SECRET_KEY
+STRIPE_WEBHOOK_SECRET=YOUR_STRIPE_WEBHOOK_SECRET
 ```
 
 ### 4.5 Test Stripe Payment
@@ -598,7 +598,7 @@ SMTP_HOST=smtp-relay.brevo.com
 SMTP_PORT=587
 SMTP_SECURE=false
 SMTP_USER=your-brevo-email@example.com
-SMTP_PASS=xsmtpsib-YOUR_BREVO_API_KEY_HERE
+SMTP_PASS=YOUR_BREVO_SMTP_API_KEY
 SMTP_FROM=DriveEasy <noreply@yourdomain.com>
 ```
 
@@ -931,7 +931,7 @@ db.Booking.find().sort({createdAt: -1}).limit(5)
 ```bash
 # Check API connectivity
 curl https://api.stripe.com/v1/charges \
-  -u sk_live_YOUR_KEY: \
+  -u YOUR_STRIPE_LIVE_SECRET_KEY: \
   -d limit=10
 
 # View webhooks in dashboard
@@ -1203,3 +1203,4 @@ artillery run load-test.yml
 **Deployment completed!** Your car rental SaaS is now running on Render with production-grade configuration.
 
 For support, check the logs, health checks, and follow the debugging guide above.
+

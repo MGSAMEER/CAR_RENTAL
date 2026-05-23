@@ -37,8 +37,8 @@ JWT_REFRESH_SECRET=min-32-chars-secure-random-string
 CLIENT_URL=https://yourdomain.com
 
 # Stripe
-STRIPE_SECRET_KEY=sk_live_xxxxx
-STRIPE_WEBHOOK_SECRET=whsec_xxxxx
+STRIPE_SECRET_KEY=YOUR_STRIPE_LIVE_SECRET_KEY
+STRIPE_WEBHOOK_SECRET=YOUR_STRIPE_WEBHOOK_SECRET
 
 # Cloudinary
 CLOUDINARY_CLOUD_NAME=xxxxx
@@ -50,7 +50,7 @@ SMTP_HOST=smtp-relay.brevo.com
 SMTP_PORT=587
 SMTP_SECURE=false
 SMTP_USER=your-email@brevo.com
-SMTP_PASS=xsmtpsib-xxxxx
+SMTP_PASS=YOUR_BREVO_SMTP_API_KEY
 SMTP_FROM=DriveEasy <noreply@yourdomain.com>
 
 # Google OAuth
@@ -278,3 +278,4 @@ Expected metrics for healthy production service:
 **Last Updated**: May 23, 2026  
 **Deployment Platform**: Render  
 **Environment**: Production
+

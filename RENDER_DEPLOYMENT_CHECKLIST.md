@@ -111,7 +111,7 @@ Schedule: Daily at 02:00 UTC
 1. Developers → API Keys → Toggle "Live Mode"
 2. Copy:
    - Publishable Key: pk_live_xxx
-   - Secret Key: sk_live_xxx (KEEP SECRET)
+   - Secret Key: YOUR_STRIPE_LIVE_SECRET_KEY (KEEP SECRET)
 3. Save both
 ```
 
@@ -123,7 +123,7 @@ Schedule: Daily at 02:00 UTC
    (You'll know the full URL after creating Render service)
 3. Events: payment_intent.succeeded, payment_intent.payment_failed
 4. Click Add endpoint
-5. Copy Signing secret: whsec_xxx
+5. Copy Signing secret: YOUR_STRIPE_WEBHOOK_SECRET
 6. Save both STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET
 ```
 
@@ -185,7 +185,8 @@ Schedule: Daily at 02:00 UTC
 1. Render Dashboard → New + → Web Service
 2. Repository: MGSAMEER/CAR_RENTAL
 3. Branch: main
-4. Click Create from GitHub
+4. Root Directory: backend
+5. Click Create from GitHub
 ```
 
 ### Configure Service
@@ -194,10 +195,12 @@ Schedule: Daily at 02:00 UTC
 1. Name: car-rental-backend
 2. Region: Frankfurt (eu-central-1)
 3. Instance: Starter Plus ($7/month)
-4. Build Command: cd backend && npm ci && npm run db:generate
-5. Start Command: cd backend && npm start
+4. Build Command: npm ci && npm run db:generate
+5. Start Command: npm start
 6. Auto-deploy: Yes (on git push)
 ```
+
+Render runs these commands from `backend/`. Do not prefix them with `cd backend`.
 
 ### Health Check
 
@@ -240,8 +243,8 @@ JWT_REFRESH_SECRET=yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy
 CLIENT_URL=https://yourdomain.com
 
 # Stripe
-STRIPE_SECRET_KEY=sk_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-STRIPE_WEBHOOK_SECRET=whsec_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+STRIPE_SECRET_KEY=YOUR_STRIPE_LIVE_SECRET_KEY
+STRIPE_WEBHOOK_SECRET=YOUR_STRIPE_WEBHOOK_SECRET
 
 # Cloudinary
 CLOUDINARY_CLOUD_NAME=your_cloud_name
@@ -253,7 +256,7 @@ SMTP_HOST=smtp-relay.brevo.com
 SMTP_PORT=587
 SMTP_SECURE=false
 SMTP_USER=your-email@brevo.com
-SMTP_PASS=xsmtpsib-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+SMTP_PASS=YOUR_BREVO_SMTP_API_KEY
 SMTP_FROM=DriveEasy <noreply@yourdomain.com>
 
 # Google
@@ -470,8 +473,8 @@ CLIENT_URL=https://yourdomain.com
 
 # Stripe
 STRIPE_PUBLISHABLE_KEY=pk_live_xxxxx (for frontend)
-STRIPE_SECRET_KEY=sk_live_xxxxx
-STRIPE_WEBHOOK_SECRET=whsec_xxxxx
+STRIPE_SECRET_KEY=YOUR_STRIPE_LIVE_SECRET_KEY
+STRIPE_WEBHOOK_SECRET=YOUR_STRIPE_WEBHOOK_SECRET
 
 # Cloudinary
 CLOUDINARY_CLOUD_NAME=your_cloud_name
@@ -483,7 +486,7 @@ SMTP_HOST=smtp-relay.brevo.com
 SMTP_PORT=587
 SMTP_SECURE=false
 SMTP_USER=your-email@brevo.com
-SMTP_PASS=xsmtpsib-xxxxx
+SMTP_PASS=YOUR_BREVO_SMTP_API_KEY
 SMTP_FROM=DriveEasy <noreply@yourdomain.com>
 
 # Google
@@ -529,3 +532,4 @@ Your car rental SaaS backend is now running on Render:
 **Estimated Total Time**: 45-60 minutes  
 **Deployment Date**: May 23, 2026  
 **Status**: ✅ Production Ready
+

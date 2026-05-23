@@ -541,7 +541,7 @@ No error in logs
    - SMTP_PORT: 587
    - SMTP_SECURE: false
    - SMTP_USER: your-email@brevo.com
-   - SMTP_PASS: xsmtpsib-xxx (API key, not password)
+   - SMTP_PASS: YOUR_BREVO_SMTP_API_KEY (API key, not password)
    ```
 
 2. **Check sender email**
@@ -789,3 +789,4 @@ When escalating, provide:
 **Version**: 1.0  
 **Last Updated**: May 23, 2026  
 **Environment**: Production Render
+

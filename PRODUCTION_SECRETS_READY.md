@@ -66,11 +66,11 @@ CLIENT_URL=https://yourdomain.com
 # ═══════════════════════════════════════════════════════════════════════════
 # Get from: Stripe Dashboard → Developers → API Keys (Toggle to Live Mode)
 # Secret key starts with: sk_live_
-STRIPE_SECRET_KEY=sk_live_YOUR_LIVE_SECRET_KEY_HERE
+STRIPE_SECRET_KEY=YOUR_STRIPE_LIVE_SECRET_KEY
 
 # Get from: Stripe Dashboard → Developers → Webhooks → Copy signing secret
 # Secret starts with: whsec_
-STRIPE_WEBHOOK_SECRET=whsec_YOUR_WEBHOOK_SIGNING_SECRET_HERE
+STRIPE_WEBHOOK_SECRET=YOUR_STRIPE_WEBHOOK_SECRET
 
 # ═══════════════════════════════════════════════════════════════════════════
 # CLOUDINARY (FILE STORAGE & CDN)
@@ -94,7 +94,7 @@ SMTP_USER=your-email@brevo.com
 
 # Password is the API Key (starts with xsmtpsib-)
 # ⚠️ NOT your Brevo password, use API Key!
-SMTP_PASS=xsmtpsib-YOUR_BREVO_API_KEY_HERE
+SMTP_PASS=YOUR_BREVO_SMTP_API_KEY
 
 # Sender email (must be verified in Brevo)
 SMTP_FROM=DriveEasy <noreply@yourdomain.com>
@@ -333,3 +333,4 @@ Once you have all the credentials:
 **Security Level**: Production-Grade  
 **Date**: May 23, 2026  
 **Version**: 1.0
+

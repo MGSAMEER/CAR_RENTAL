@@ -145,7 +145,7 @@ Express server ready to start ✅
    
    Copy:
    - Publishable Key: pk_live_xxxxx (can be public)
-   - Secret Key: sk_live_xxxxx (KEEP SECRET!)
+   - Secret Key: YOUR_STRIPE_LIVE_SECRET_KEY (KEEP SECRET!)
    
    ⚠️ SAVE BOTH - needed for Render environment
    ```
@@ -165,7 +165,7 @@ Express server ready to start ✅
    
    Click "Add endpoint"
    
-   Copy Signing secret: whsec_xxxxx
+   Copy Signing secret: YOUR_STRIPE_WEBHOOK_SECRET
    ⚠️ SAVE THIS - needed for Render environment
    ```
 
@@ -246,7 +246,7 @@ Express server ready to start ✅
    
    Copy:
    - SMTP Username: your-brevo-email@example.com
-   - SMTP Password: xsmtpsib-xxxxx (This is API Key!)
+   - SMTP Password: YOUR_BREVO_SMTP_API_KEY (This is API Key!)
    
    ⚠️ SAVE BOTH - needed for Render environment
    ```
@@ -333,7 +333,7 @@ Express server ready to start ✅
    
    Repository: MGSAMEER/CAR_RENTAL
    Branch: main
-   Root Directory: leave empty (git auto-detects)
+   Root Directory: backend
    
    Click "Create from GitHub"
    ```
@@ -346,11 +346,16 @@ Express server ready to start ✅
    Region: Frankfurt (eu-central-1)
    Instance: Starter Plus ($7/month)
    
-   Build Command: cd backend && npm ci && npm run db:generate
-   Start Command: cd backend && npm start
+   Build Command: npm ci && npm run db:generate
+   Start Command: npm start
    
    Auto-deploy: Yes (from main branch)
    ```
+
+   Why:
+   - The repository is a monorepo with `frontend/` and `backend/`.
+   - Render must use `backend/` as the root directory so it finds `backend/package.json`.
+   - Build and start commands run inside `backend/`, so do not prefix them with `cd backend`.
 
 3. **Configure Health Check**
    ```
@@ -400,8 +405,8 @@ JWT_REFRESH_SECRET=<GENERATE - see below>
 CLIENT_URL=https://yourdomain.com
 
 # Stripe
-STRIPE_SECRET_KEY=sk_live_xxxxx
-STRIPE_WEBHOOK_SECRET=whsec_xxxxx
+STRIPE_SECRET_KEY=YOUR_STRIPE_LIVE_SECRET_KEY
+STRIPE_WEBHOOK_SECRET=YOUR_STRIPE_WEBHOOK_SECRET
 
 # Cloudinary
 CLOUDINARY_CLOUD_NAME=your_cloud_name
@@ -413,7 +418,7 @@ SMTP_HOST=smtp-relay.brevo.com
 SMTP_PORT=587
 SMTP_SECURE=false
 SMTP_USER=your-email@brevo.com
-SMTP_PASS=xsmtpsib-xxxxx
+SMTP_PASS=YOUR_BREVO_SMTP_API_KEY
 SMTP_FROM=DriveEasy <noreply@yourdomain.com>
 
 # Google OAuth
@@ -667,3 +672,4 @@ If you get stuck on any phase:
 
 **Status**: Phase 1 Complete ✅, Phase 2-13 Ready to Execute  
 **Next Step**: Follow Phase 2 (MongoDB Atlas Setup)
+
