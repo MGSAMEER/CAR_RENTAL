@@ -12,8 +12,11 @@ services:
     plan: standard
     region: frankfurt
 
-    # Commands run from rootDir, so do not prefix these with "cd backend".
-    buildCommand: npm ci && npm run db:generate
+    # Node 20 LTS pinned below via package.json engines; render.yaml version is informational.
+    runtime: node@20
+
+    # Clean install from lockfile, then generate Prisma client (runs db:generate alias)
+    buildCommand: npm ci --legacy-peer-deps && npm run db:generate
     startCommand: npm start
 
     healthCheckPath: /health
