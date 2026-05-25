@@ -13,10 +13,6 @@ lerna-debug.log
 .env.production
 .env.test
 
-# Local backend runtime data
-backend/prisma/dev.db
-backend/public/uploads/
-
 # OS files
 .DS_Store
 Thumbs.db
