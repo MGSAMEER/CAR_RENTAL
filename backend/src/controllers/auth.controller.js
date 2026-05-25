@@ -55,17 +55,7 @@ const register = async (req, res, next) => {
       select: { id: true, name: true, email: true, role: true, createdAt: true },
     });
 
-    // Send async emails - don't block registration on email failure
-    (async () => {
-      try {
-        await sendWelcomeEmail(user.email, user.name);
-        logger.info(`[EMAIL] Welcome email sent to ${user.email}`);
-      } catch (err) {
-        logger.error(`[EMAIL] Welcome email failed for ${user.email}: ${err.message}`);
-      }
-    })();
-
-    // Always send verification email
+    // Send verification email
     (async () => {
       try {
         await sendEmailVerification(user.email, verificationToken);
@@ -229,6 +219,16 @@ const verifyEmail = async (req, res, next) => {
         emailVerificationExpires: null,
       },
     });
+
+    // Send welcome email asynchronously after successful verification
+    (async () => {
+      try {
+        await sendWelcomeEmail(user.email, user.name);
+        logger.info(`[EMAIL] Welcome email sent to newly verified user ${user.email}`);
+      } catch (err) {
+        logger.error(`[EMAIL] Welcome email failed for ${user.email}: ${err.message}`);
+      }
+    })();
 
     res.json({ success: true, message: 'Email verified successfully' });
   } catch (error) {
