@@ -1,6 +1,5 @@
-# Render Blueprint for the backend service in this monorepo.
+# Render Blueprint for the backend service.
 # Repository root contains frontend/ and backend/.
-# Render must use backend/ as the service root so it installs backend/package.json.
 
 services:
   - type: web
@@ -9,15 +8,11 @@ services:
     rootDir: backend
     branch: main
     autoDeploy: true
-    plan: standard
     region: frankfurt
 
-    # Node 20 LTS pinned below via package.json engines; render.yaml version is informational.
-    runtime: node@20
-
-    # Clean install from lockfile, then generate Prisma client (runs db:generate alias)
-    buildCommand: npm ci --legacy-peer-deps && npm run db:generate
-    startCommand: npm start
+    # Clean install from lockfile, then generate Prisma client
+    buildCommand: npm ci && npx prisma generate
+    startCommand: node src/server.js
 
     healthCheckPath: /health
 
@@ -29,6 +24,8 @@ services:
         value: "5000"
       - key: LOG_LEVEL
         value: info
+      - key: NODE_VERSION
+        value: "20.18.1"
 
       # Database
       - key: DATABASE_URL
