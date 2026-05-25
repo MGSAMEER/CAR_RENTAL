@@ -42,6 +42,42 @@ router.post('/refresh', refreshToken);
 router.post('/logout', logout);
 router.get('/me', authenticate, getMe);
 
+// SMTP Test Route
+router.get('/test-smtp', async (req, res) => {
+  try {
+    const { email } = req.query;
+    if (!email) {
+      return res.status(400).json({ success: false, message: 'Recipient email query parameter is required (?email=...)' });
+    }
+    
+    logger.info(`[SMTP TEST ROUTE] Triggering manual SMTP test email to: ${email}`);
+    const { getMailerHealth, sendMailAsync } = require('../utils/mailer');
+    const health = getMailerHealth();
+    
+    if (!health.configured) {
+      return res.status(500).json({ 
+        success: false, 
+        message: 'SMTP is not configured in backend environment variables.',
+        health 
+      });
+    }
+    
+    await sendMailAsync({
+      to: email,
+      subject: 'DriveEasy SMTP Connection Test 🚗',
+      html: '<h1>SMTP works!</h1><p>This is a test from the DriveEasy backend. If you see this, your Brevo configuration is 100% functional!</p>'
+    });
+    
+    res.json({ 
+      success: true, 
+      message: `Test email successfully triggered for ${email}. Check server logs for delivery status.` 
+    });
+  } catch (err) {
+    logger.error(`[SMTP TEST ROUTE] SMTP test failed: ${err.message}`);
+    res.status(500).json({ success: false, message: `SMTP test failed: ${err.message}` });
+  }
+});
+
 // Additional security routes
 router.get('/verify-email/:token', verifyEmail);
 router.post('/forgot-password', authLimiter, authRules.forgotPassword, validate, forgotPassword);

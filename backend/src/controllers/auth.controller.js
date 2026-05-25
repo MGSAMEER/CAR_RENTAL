@@ -259,7 +259,11 @@ const forgotPassword = async (req, res, next) => {
       },
     });
 
-    if (sendPasswordReset) sendPasswordReset(user.email, resetToken);
+    if (sendPasswordReset) {
+      sendPasswordReset(user.email, resetToken).catch((err) => {
+        logger.error(`[EMAIL] Password reset email failed for ${user.email}: ${err.message}`);
+      });
+    }
 
     logger.info(`[AUTH] Password reset requested for: ${email}`);
 
