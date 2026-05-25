@@ -1,86 +1,99 @@
-const nodemailer = require('nodemailer');
 const logger = require('./logger');
 
-// Production SMTP Configuration
-const emailConfigured = !!(process.env.SMTP_USER && process.env.SMTP_PASS);
+// ─── Brevo HTTP API Configuration ────────────────────────────────────────────
+// Uses Brevo's REST API (HTTPS on port 443) instead of SMTP (port 587).
+// Render blocks outbound SMTP ports, so HTTP API is the only reliable method.
+// ─────────────────────────────────────────────────────────────────────────────
 
-// Log SMTP Configuration status on startup
-logger.info('[MAILER INITIALIZATION] Checking SMTP environment variables...');
-logger.info(`- SMTP_HOST: ${process.env.SMTP_HOST || 'Not Set'}`);
-logger.info(`- SMTP_PORT: ${process.env.SMTP_PORT || 'Not Set'}`);
-logger.info(`- SMTP_SECURE: ${process.env.SMTP_SECURE || 'Not Set'}`);
-logger.info(`- SMTP_USER: ${process.env.SMTP_USER ? process.env.SMTP_USER : 'Not Set'}`);
-logger.info(`- SMTP_FROM: ${process.env.SMTP_FROM || 'Not Set'}`);
-logger.info(`- CLIENT_URL: ${process.env.CLIENT_URL || 'Not Set'}`);
+const BREVO_API_URL = 'https://api.brevo.com/v3/smtp/email';
+const BREVO_API_KEY = process.env.BREVO_API_KEY || process.env.SMTP_PASS;
 
-const transporter = emailConfigured
-  ? nodemailer.createTransport({
-      host: process.env.SMTP_HOST || 'smtp.gmail.com',
-      port: parseInt(process.env.SMTP_PORT || '587', 10),
-      secure: process.env.SMTP_SECURE === 'true', // true for port 465, false for other ports
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
-      tls: {
-        // Do not fail on invalid certificates (makes connection robust in Docker/Render)
-        rejectUnauthorized: false
-      }
-    })
-  : null;
+// Parse sender from SMTP_FROM: "DriveEasy <email@example.com>" → { name, email }
+const parseSender = () => {
+  const raw = process.env.SMTP_FROM || '';
+  const match = raw.match(/^(.+?)\s*<(.+?)>$/);
+  if (match) {
+    return { name: match[1].trim(), email: match[2].trim() };
+  }
+  // Fallback: use SMTP_USER as sender email
+  return { name: 'DriveEasy', email: process.env.SMTP_USER || 'noreply@driveeasy.com' };
+};
 
-// Verify connection configuration on startup
-if (emailConfigured && transporter) {
-  logger.info('[MAILER] SMTP configuration detected. Verifying connection to relay...');
-  transporter.verify((error, success) => {
-    if (error) {
-      logger.error(`[MAILER] ❌ SMTP Connection verification failed: ${error.message}`);
-      logger.error(`[MAILER] Error details: ${JSON.stringify(error)}`);
-    } else {
-      logger.info('[MAILER] ✅ SMTP Connection verified successfully. Ready to send emails.');
-    }
-  });
-} else {
-  logger.warn('[MAILER] ⚠️ SMTP credentials not fully configured. All email sending is disabled.');
+const emailConfigured = !!BREVO_API_KEY;
+
+// Log configuration status on startup
+logger.info('[MAILER INIT] Checking Brevo HTTP API configuration...');
+logger.info(`  - BREVO_API_KEY: ${BREVO_API_KEY ? BREVO_API_KEY.substring(0, 12) + '...' : '❌ NOT SET'}`);
+logger.info(`  - SMTP_FROM: ${process.env.SMTP_FROM || '❌ NOT SET'}`);
+logger.info(`  - CLIENT_URL: ${process.env.CLIENT_URL || '❌ NOT SET (will default to localhost)'}`);
+logger.info(`  - NODE_ENV: ${process.env.NODE_ENV || 'not set'}`);
+
+if (!emailConfigured) {
+  logger.warn('[MAILER] ⚠️ No Brevo API key found. All email sending is DISABLED.');
+  logger.warn('[MAILER] Set BREVO_API_KEY in your Render environment variables.');
 }
 
 /**
- * Robust async mail sender with exponential backoff retries.
- * Returns a Promise so the caller can handle success/failure.
+ * Send an email via Brevo's HTTP Transactional Email API.
+ * Endpoint: POST https://api.brevo.com/v3/smtp/email
+ * 
+ * This bypasses SMTP port restrictions on Render by using HTTPS (port 443).
  */
 const sendMailAsync = async (options, maxRetries = 3) => {
   logger.info(`[MAILER] Initiating email send to: ${options.to} (Subject: "${options.subject}")`);
-  
-  if (!emailConfigured || !transporter) {
-    logger.warn(`[MAILER] ⚠️ Email not configured. Skipping email to: ${options.to}`);
+
+  if (!emailConfigured) {
+    logger.warn(`[MAILER] ⚠️ Brevo API key not configured. Skipping email to: ${options.to}`);
     return false;
   }
+
+  const sender = parseSender();
+  const payload = {
+    sender: { name: sender.name, email: sender.email },
+    to: [{ email: options.to }],
+    subject: options.subject,
+    htmlContent: options.html,
+  };
 
   let attempt = 0;
   while (attempt < maxRetries) {
     try {
-      const info = await transporter.sendMail({
-        from: process.env.SMTP_FROM || `"DriveEasy Premium" <${process.env.SMTP_USER}>`,
-        ...options,
+      const response = await fetch(BREVO_API_URL, {
+        method: 'POST',
+        headers: {
+          'accept': 'application/json',
+          'api-key': BREVO_API_KEY,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(payload),
       });
-      logger.info(`[MAILER] ✅ Email successfully sent to: ${options.to}. MessageId: ${info.messageId}`);
-      return true; // Success, exit retry loop
+
+      const data = await response.json().catch(() => ({}));
+
+      if (response.ok) {
+        logger.info(`[MAILER] ✅ Email sent to: ${options.to}. MessageId: ${data.messageId || 'N/A'}`);
+        return true;
+      }
+
+      // Brevo returned an error response
+      throw new Error(`Brevo API ${response.status}: ${data.message || JSON.stringify(data)}`);
     } catch (err) {
       attempt++;
       logger.warn(`[MAILER] ⚠️ Attempt ${attempt}/${maxRetries} failed for ${options.to}: ${err.message}`);
-      
+
       if (attempt >= maxRetries) {
         logger.error(`[MAILER] ❌ Final failure sending email to ${options.to}: ${err.message}`);
-        throw err; // Escalate error to caller
+        throw err;
       }
-      
-      // Exponential backoff (1s, 2s, 4s...)
+
+      // Exponential backoff (2s, 4s, 8s...)
       await new Promise((resolve) => setTimeout(resolve, Math.pow(2, attempt) * 1000));
     }
   }
 };
 
-// --- Mobile Friendly Template Wrapper ---
+// ─── Mobile-Friendly Email Template ──────────────────────────────────────────
+
 const wrapHtml = (content) => `
 <!DOCTYPE html>
 <html>
@@ -112,7 +125,12 @@ const wrapHtml = (content) => `
 </html>
 `;
 
-// --- Services ---
+// ─── Email Services ──────────────────────────────────────────────────────────
+
+const getClientUrl = () => {
+  const url = process.env.CLIENT_URL || 'http://localhost:3000';
+  return url.replace(/\/+$/, '');
+};
 
 const sendWelcomeEmail = async (userEmail, userName) => {
   logger.info(`[MAILER] Preparing welcome email for ${userEmail}`);
@@ -120,7 +138,7 @@ const sendWelcomeEmail = async (userEmail, userName) => {
     <h2>Welcome to the fleet, ${userName}! 🚗</h2>
     <p>Your account is fully set up. Experience the thrill of the open road with our premium selection of vehicles.</p>
     <div style="text-align: center;">
-      <a href="${process.env.CLIENT_URL || 'http://localhost:3000'}/cars" class="button">Book Your First Ride</a>
+      <a href="${getClientUrl()}/cars" class="button">Book Your First Ride</a>
     </div>
   `;
   return sendMailAsync({ to: userEmail, subject: 'Welcome to DriveEasy! 🚗', html: wrapHtml(content) });
@@ -145,7 +163,7 @@ const sendBookingConfirmation = async (userEmail, bookingDetails) => {
       <tr><td class="label">Reference ID</td><td class="value" style="font-size: 0.8em; color: #9ca3af;">${intentId}</td></tr>
     </table>
     <div style="text-align: center;">
-      <a href="${process.env.CLIENT_URL || 'http://localhost:3000'}/dashboard" class="button">View My Bookings</a>
+      <a href="${getClientUrl()}/dashboard" class="button">View My Bookings</a>
     </div>
   `;
   return sendMailAsync({ to: userEmail, subject: '🚗 DriveEasy: Booking Confirmed', html: wrapHtml(content) });
@@ -174,11 +192,9 @@ const sendRefundNotification = async (userEmail, amount, carName) => {
 };
 
 const sendEmailVerification = async (userEmail, token) => {
-  const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000';
-  const verifyLink = `${clientUrl.replace(/\/+$/, '')}/verify-email?token=${token}`;
-  
-  logger.info(`[MAILER] Preparing verification email for ${userEmail}. Generated Link: ${verifyLink}`);
-  
+  const verifyLink = `${getClientUrl()}/verify-email?token=${token}`;
+  logger.info(`[MAILER] Preparing verification email for ${userEmail}. Link: ${verifyLink}`);
+
   const content = `
     <h2>Action Required: Verify Email 🛡️</h2>
     <p>Please confirm your email address to unlock all DriveEasy features and secure your account.</p>
@@ -195,11 +211,9 @@ const sendEmailVerification = async (userEmail, token) => {
 };
 
 const sendPasswordReset = async (userEmail, token) => {
-  const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000';
-  const resetLink = `${clientUrl.replace(/\/+$/, '')}/reset-password?token=${token}`;
-  
-  logger.info(`[MAILER] Preparing password reset email for ${userEmail}. Generated Link: ${resetLink}`);
-  
+  const resetLink = `${getClientUrl()}/reset-password?token=${token}`;
+  logger.info(`[MAILER] Preparing password reset email for ${userEmail}. Link: ${resetLink}`);
+
   const content = `
     <h2>Reset Your Password 🔐</h2>
     <p>We received a request to reset your password. Click below to create a new one.</p>
@@ -221,7 +235,7 @@ const sendAdminNotification = async (adminEmail, title, message) => {
     <h2 style="color: #dc2626;">System Alert: ${title} 🛑</h2>
     <p>${message}</p>
     <div style="text-align: center;">
-      <a href="${process.env.CLIENT_URL || 'http://localhost:3000'}/admin" class="button">Go to Admin Dashboard</a>
+      <a href="${getClientUrl()}/admin" class="button">Go to Admin Dashboard</a>
     </div>
   `;
   return sendMailAsync({ to: adminEmail, subject: `[Admin Alert] ${title}`, html: wrapHtml(content) });
@@ -230,16 +244,17 @@ const sendAdminNotification = async (adminEmail, title, message) => {
 const getMailerHealth = () => {
   return {
     configured: emailConfigured,
-    idle: transporter ? transporter.isIdle() : false,
+    method: 'Brevo HTTP API',
+    apiKeyPresent: !!BREVO_API_KEY,
   };
 };
 
-module.exports = { 
-  sendWelcomeEmail, 
-  sendBookingConfirmation, 
+module.exports = {
+  sendWelcomeEmail,
+  sendBookingConfirmation,
   sendPaymentSuccessEmail,
   sendRefundNotification,
-  sendEmailVerification, 
+  sendEmailVerification,
   sendPasswordReset,
   sendAdminNotification,
   getMailerHealth,
