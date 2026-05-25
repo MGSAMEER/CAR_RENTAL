@@ -42,39 +42,40 @@ router.post('/refresh', refreshToken);
 router.post('/logout', logout);
 router.get('/me', authenticate, getMe);
 
-// SMTP Test Route
-router.get('/test-smtp', async (req, res) => {
+// Brevo Email Test Route
+router.get('/test-email', async (req, res) => {
   try {
     const { email } = req.query;
     if (!email) {
       return res.status(400).json({ success: false, message: 'Recipient email query parameter is required (?email=...)' });
     }
     
-    logger.info(`[SMTP TEST ROUTE] Triggering manual SMTP test email to: ${email}`);
+    logger.info(`[EMAIL TEST] Triggering Brevo API test email to: ${email}`);
     const { getMailerHealth, sendMailAsync } = require('../utils/mailer');
     const health = getMailerHealth();
     
     if (!health.configured) {
       return res.status(500).json({ 
         success: false, 
-        message: 'SMTP is not configured in backend environment variables.',
+        message: 'Brevo API key is not configured. Set BREVO_API_KEY in your environment variables.',
         health 
       });
     }
     
     await sendMailAsync({
       to: email,
-      subject: 'DriveEasy SMTP Connection Test 🚗',
-      html: '<h1>SMTP works!</h1><p>This is a test from the DriveEasy backend. If you see this, your Brevo configuration is 100% functional!</p>'
+      subject: 'DriveEasy Email Test 🚗',
+      html: '<h1>Email works!</h1><p>This is a test from the DriveEasy backend via Brevo HTTP API. If you see this, your email configuration is 100% functional!</p>'
     });
     
     res.json({ 
       success: true, 
-      message: `Test email successfully triggered for ${email}. Check server logs for delivery status.` 
+      message: `Test email sent to ${email} via Brevo HTTP API.`,
+      health 
     });
   } catch (err) {
-    logger.error(`[SMTP TEST ROUTE] SMTP test failed: ${err.message}`);
-    res.status(500).json({ success: false, message: `SMTP test failed: ${err.message}` });
+    logger.error(`[EMAIL TEST] Brevo API test failed: ${err.message}`);
+    res.status(500).json({ success: false, message: `Email test failed: ${err.message}` });
   }
 });
 
