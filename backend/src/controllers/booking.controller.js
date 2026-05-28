@@ -1,14 +1,64 @@
 const { prisma } = require('../config/database');
-const { sendBookingConfirmation } = require('../utils/mailer');
+const { sendBookingCancellation } = require('../utils/mailer');
 
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY || 'sk_test_placeholder');
+
+/**
+ * Calculate refund amount based on time before booking starts
+ * @param {Date} startDate - Booking start date
+ * @param {number} totalCost - Total booking cost
+ * @returns {number} - Refund amount
+ */
+const calculateRefund = (startDate, totalCost) => {
+  const now = new Date();
+  const hoursBeforeStart = (startDate.getTime() - now.getTime()) / (1000 * 60 * 60);
+  
+  if (hoursBeforeStart > 24) {
+    return totalCost; // 100% refund
+  } else if (hoursBeforeStart >= 6) {
+    return totalCost * 0.5; // 50% refund
+  } else {
+    return 0; // No refund
+  }
+};
+
+/**
+ * Process Stripe refund
+ * @param {string} paymentIntentId - Stripe payment intent ID
+ * @param {number} refundAmount - Amount to refund (in cents)
+ * @returns {Promise<{refundId: string, status: string}>}
+ */
+const processStripeRefund = async (paymentIntentId, refundAmount) => {
+  try {
+    if (!paymentIntentId) {
+      return { refundId: null, status: 'skipped' };
+    }
+    
+    // Get payment intent to verify it exists and is captured
+    const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
+    
+    if (intent.status !== 'succeeded') {
+      return { refundId: null, status: 'failed' };
+    }
+    
+    // Create refund
+    const refund = await stripe.refunds.create({
+      payment_intent: paymentIntentId,
+      amount: Math.round(refundAmount * 100), // Convert to cents
+    });
+    
+    return { refundId: refund.id, status: 'processed' };
+  } catch (error) {
+    console.error('[REFUND] Stripe refund error:', error.message);
+    return { refundId: null, status: 'failed' };
+  }
+};
 
 // POST /api/v1/bookings
 const createBooking = async (req, res, next) => {
   try {
     console.log('[BOOKING DEBUG] Request body:', req.body);
     
-    // Strictly use the authenticated user's ID to prevent IDOR
     const userId = req.user.id;
     const carId = req.body.car_id;
     const startDate = req.body.start_date;
@@ -19,13 +69,13 @@ const createBooking = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Missing required fields (car_id, start_date, end_date, payment_intent_id)' });
     }
 
-    // Idempotency check: If webhook already created this booking, return it immediately
+    // Idempotency check
     const existingBooking = await prisma.booking.findFirst({
       where: { stripeIntentId: paymentIntentId },
       include: {
         car: { select: { name: true, brand: true, pricePerDay: true } },
         user: { select: { name: true, email: true } },
-      }
+      },
     });
 
     if (existingBooking) {
@@ -44,13 +94,10 @@ const createBooking = async (req, res, next) => {
 
     const start = new Date(startDate);
     const end = new Date(endDate);
-    
-    // Normalize "now" to the start of the day to avoid 400 errors for same-day bookings
     const now = new Date();
     now.setHours(0, 0, 0, 0);
 
     if (start < now) {
-      console.warn('[BOOKING] Start date is in the past:', { start, now });
       return res.status(400).json({
         success: false,
         error: 'INVALID_DATE',
@@ -65,7 +112,6 @@ const createBooking = async (req, res, next) => {
       });
     }
 
-    // Check car exists and is available (general availability, not booking conflict)
     const car = await prisma.car.findUnique({ where: { id: carId } });
     if (!car) {
       return res.status(404).json({ success: false, error: 'NOT_FOUND', message: 'Car not found' });
@@ -74,7 +120,6 @@ const createBooking = async (req, res, next) => {
       return res.status(409).json({ success: false, error: 'UNAVAILABLE', message: 'This car is currently not in service' });
     }
 
-    // Check for overlapping bookings
     const overlap = await prisma.booking.findFirst({
       where: {
         carId,
@@ -92,52 +137,39 @@ const createBooking = async (req, res, next) => {
       });
     }
 
-    // Calculate total cost (consistent with payment and frontend logic)
     const days = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1);
     const totalCost = parseFloat(car.pricePerDay) * days;
 
     let paymentStatus = 'pending';
     let retries = 0;
-    const maxRetries = 5; // Increased from 3 to 5
+    const maxRetries = 5;
     let lastIntentStatus = null;
     
-    // Retry logic to check payment intent status (accounting for Stripe processing delay)
     while (retries < maxRetries && paymentStatus === 'pending') {
       try {
         const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
         lastIntentStatus = intent.status;
-        console.log(`[BOOKING DEBUG] Stripe Intent Status (Attempt ${retries + 1}/${maxRetries}): ${intent.status}`);
         
         if (intent.status === 'succeeded') {
           paymentStatus = 'paid';
         } else if (intent.status === 'processing') {
-          // Payment is processing, allow booking but mark as pending
-          console.log('[BOOKING DEBUG] Payment is processing, creating booking with pending status');
           paymentStatus = 'pending';
-          break; // Exit retry loop
+          break;
         } else if (intent.status === 'requires_action' || intent.status === 'requires_payment_method') {
-          // Payment not completed - retry after delay
           retries++;
           if (retries < maxRetries) {
-            await new Promise(resolve => setTimeout(resolve, 500)); // Wait 500ms before retry
+            await new Promise(resolve => setTimeout(resolve, 500));
           } else {
-            // Max retries reached - allow booking but mark as pending, let webhook update it
-            console.log(`[BOOKING DEBUG] Max retries reached at status: ${intent.status}, creating booking with pending status`);
             paymentStatus = 'pending';
           }
         } else if (intent.status === 'canceled') {
-          // Payment definitely failed
           return res.status(400).json({ success: false, message: `Payment was cancelled` });
         }
       } catch (err) {
-        console.error('[BOOKING DEBUG] Stripe retrieval error:', err.message);
         return res.status(400).json({ success: false, message: 'Invalid payment intent ID' });
       }
     }
-    
-    console.log(`[BOOKING DEBUG] Final payment status: ${paymentStatus}, last intent status: ${lastIntentStatus}`);
 
-    // Create booking in a transaction
     const booking = await prisma.$transaction(async (tx) => {
       const newBooking = await tx.booking.create({
         data: { 
@@ -155,21 +187,17 @@ const createBooking = async (req, res, next) => {
           user: { select: { name: true, email: true } },
         },
       });
-      // REMOVED: Toggling car.availability = false
       return newBooking;
     });
 
-    // Update Stripe payment intent metadata with bookingId for webhook reference
     try {
       await stripe.paymentIntents.update(paymentIntentId, {
         metadata: { bookingId: booking.id }
       });
     } catch (err) {
       console.error('[BOOKING] Failed to update payment intent metadata:', err.message);
-      // Don't fail the booking if this fails, just log it
     }
 
-    // Send async confirmation email
     sendBookingConfirmation(booking.user.email, booking);
 
     res.status(201).json({
@@ -185,13 +213,6 @@ const createBooking = async (req, res, next) => {
 // GET /api/v1/bookings  [Admin: all | User: own]
 const getBookings = async (req, res, next) => {
   try {
-    console.log('[BOOKING CONTROLLER] getBookings called', {
-      userId: req.user?.id,
-      userRole: req.user?.role,
-      isAdmin: req.user?.role === 'admin',
-      timestamp: new Date().toISOString(),
-    });
-
     const isAdmin = req.user.role === 'admin';
     const where = isAdmin ? {} : { userId: req.user.id };
 
@@ -206,41 +227,12 @@ const getBookings = async (req, res, next) => {
       orderBy: { createdAt: 'desc' },
     });
 
-    console.log('[BOOKING CONTROLLER] Bookings retrieved successfully', {
-      count: bookings.length,
-      hasData: bookings.length > 0,
-      firstBookingStructure: bookings.length > 0 ? {
-        hasId: !!bookings[0].id,
-        hasCar: !!bookings[0].car,
-        hasUser: !!bookings[0].user,
-        hasStatus: !!bookings[0].status,
-        carHasName: !!bookings[0].car?.name,
-        userHasName: !!bookings[0].user?.name,
-      } : 'no-bookings',
-      timestamp: new Date().toISOString(),
-    });
-
-    // ✅ Validate response shape before sending
-    const responseData = {
+    res.json({
       success: true,
       data: bookings,
       count: bookings.length,
-    };
-
-    console.log('[BOOKING CONTROLLER] Sending response', {
-      statusCode: 200,
-      isArray: Array.isArray(responseData.data),
-      dataLength: responseData.data.length,
     });
-
-    res.json(responseData);
   } catch (error) {
-    console.error('[BOOKING CONTROLLER] getBookings error', {
-      errorMessage: error.message,
-      errorStack: error.stack,
-      userId: req.user?.id,
-      timestamp: new Date().toISOString(),
-    });
     next(error);
   }
 };
@@ -260,7 +252,6 @@ const getBookingById = async (req, res, next) => {
       return res.status(404).json({ success: false, error: 'NOT_FOUND', message: 'Booking not found' });
     }
 
-    // Only owner or admin can view
     if (req.user.role !== 'admin' && booking.userId !== req.user.id) {
       return res.status(403).json({ success: false, error: 'FORBIDDEN', message: 'Access denied' });
     }
@@ -274,7 +265,11 @@ const getBookingById = async (req, res, next) => {
 // PATCH /api/v1/bookings/:id/cancel
 const cancelBooking = async (req, res, next) => {
   try {
-    const booking = await prisma.booking.findUnique({ where: { id: req.params.id } });
+    const { reason } = req.body;
+    const booking = await prisma.booking.findUnique({ 
+      where: { id: req.params.id },
+      include: { user: true, car: true }
+    });
 
     if (!booking) {
       return res.status(404).json({ success: false, error: 'NOT_FOUND', message: 'Booking not found' });
@@ -286,16 +281,100 @@ const cancelBooking = async (req, res, next) => {
       return res.status(400).json({ success: false, error: 'ALREADY_CANCELLED', message: 'Booking is already cancelled' });
     }
 
+    // Prevent cancellation after booking start time
+    const now = new Date();
+    if (booking.startDate <= now) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'BOOKING_STARTED', 
+        message: 'Cannot cancel a booking that has already started' 
+      });
+    }
+
+    // Calculate refund amount
+    const refundAmount = calculateRefund(booking.startDate, booking.totalCost || 0);
+    
+    // Prepare refund if payment exists
+    let refundStatus = 'not_requested';
+    let refundId = null;
+    
+    if (booking.stripeIntentId && booking.paymentStatus === 'paid' && refundAmount > 0) {
+      refundStatus = 'pending';
+    }
+
     const updated = await prisma.$transaction(async (tx) => {
+      // Update booking with cancellation details
       const cancelled = await tx.booking.update({
         where: { id: req.params.id },
-        data: { status: 'cancelled' },
+        data: { 
+          status: 'cancelled',
+          cancelledAt: new Date(),
+          cancellationReason: reason || null,
+          refundAmount,
+          refundStatus,
+        },
       });
-      // REMOVED: Toggling car.availability = true
+
+      // Create audit log for admin actions
+      if (req.user.role === 'admin') {
+        await tx.auditLog.create({
+          data: {
+            adminId: req.user.id,
+            action: 'CANCEL_BOOKING',
+            entity: 'Booking',
+            entityId: req.params.id,
+            details: { reason, refundAmount, refundStatus }
+          }
+        });
+      }
+      
       return cancelled;
     });
 
-    res.json({ success: true, message: 'Booking cancelled successfully', data: updated });
+    // Process refund asynchronously (outside transaction)
+    if (booking.stripeIntentId && booking.paymentStatus === 'paid' && refundAmount > 0) {
+      setImmediate(async () => {
+        try {
+          const result = await processStripeRefund(booking.stripeIntentId, refundAmount);
+          
+          // Update refund status
+          await prisma.booking.update({
+            where: { id: req.params.id },
+            data: {
+              refundStatus: result.status,
+              refundId: result.refundId,
+            },
+          });
+
+          // Send cancellation email
+          sendBookingCancellation(booking.user.email, {
+            ...booking,
+            refundAmount,
+            refundStatus: result.status,
+          });
+        } catch (error) {
+          console.error('[CANCEL] Background refund error:', error);
+        }
+      });
+    } else {
+      // Still send cancellation email for no-refund scenarios
+      sendBookingCancellation(booking.user.email, {
+        ...booking,
+        refundAmount,
+        refundStatus: 'not_requested',
+      });
+    }
+
+    res.json({ 
+      success: true, 
+      message: 'Booking cancelled successfully', 
+      data: {
+        ...updated,
+        refundAmount,
+        refundStatus,
+        refundPolicy: 'Full refund if >24h before start, 50% if 6-24h, no refund if <6h'
+      }
+    });
   } catch (error) {
     next(error);
   }
@@ -305,17 +384,12 @@ const cancelBooking = async (req, res, next) => {
 const getBookedDates = async (req, res, next) => {
   try {
     const { carId } = req.params;
-    
-    console.log('[BOOKING CONTROLLER] getBookedDates called', {
-      carId,
-      timestamp: new Date().toISOString(),
-    });
 
     const bookings = await prisma.booking.findMany({
       where: {
         carId,
         status: { in: ['confirmed', 'active'] },
-        endDate: { gte: new Date() }, // Only future bookings
+        endDate: { gte: new Date() },
       },
       select: {
         startDate: true,
@@ -323,13 +397,6 @@ const getBookedDates = async (req, res, next) => {
       },
     });
 
-    console.log('[BOOKING CONTROLLER] Booked bookings found', {
-      carId,
-      bookingCount: bookings.length,
-      timestamp: new Date().toISOString(),
-    });
-
-    // Flatten date ranges into a list of specific dates
     const bookedDates = [];
     bookings.forEach((booking) => {
       let current = new Date(booking.startDate);
@@ -341,15 +408,7 @@ const getBookedDates = async (req, res, next) => {
       }
     });
 
-    // Remove duplicates and sort
     const uniqueDates = [...new Set(bookedDates)].sort();
-
-    console.log('[BOOKING CONTROLLER] Booked dates calculated', {
-      carId,
-      uniqueDateCount: uniqueDates.length,
-      sampleDates: uniqueDates.slice(0, 3),
-      timestamp: new Date().toISOString(),
-    });
 
     res.json({
       success: true,

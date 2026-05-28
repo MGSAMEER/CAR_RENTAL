@@ -94,19 +94,24 @@ model Branch {
 }
 
 model Booking {
-  id        String    @id @default(uuid()) @map("_id")
-  userId    String
-  carId     String
-  startDate DateTime
-  endDate   DateTime
-  totalCost      Float
-  status         String    @default("confirmed")
-  paymentStatus  String?   @default("pending")
-  stripeIntentId String?   
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  id              String    @id @default(uuid()) @map("_id")
+  userId          String
+  carId           String
+  startDate       DateTime
+  endDate         DateTime
+  totalCost       Float
+  status          String    @default("confirmed")
+  paymentStatus   String?   @default("pending")
+  stripeIntentId  String?   
+  cancellationReason String? 
+  cancelledAt     DateTime?
+  refundAmount    Float?
+  refundStatus    String?   @default("not_requested") // not_requested, pending, processed, failed
+  refundId        String?  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
-  isDeleted      Boolean   @default(false)
+  isDeleted       Boolean   @default(false)
 
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   car       Car       @relation(fields: [carId], references: [id], onDelete: Cascade)
@@ -147,15 +152,15 @@ model Review {
 }
 
 model DriverDocument {
-  id                 String   @id @default(uuid()) @map("_id")
-  userId             String   @unique
-  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  licenseNumber      String
-  licenseExpiry      DateTime
-  documentUrl        String
+  id                String   @id @default(uuid()) @map("_id")
+  userId            String   @unique
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  licenseNumber     String
+  licenseExpiry     DateTime
+  documentUrl       String
   verificationStatus String   @default("pending") 
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   @@map("driver_documents")
 }

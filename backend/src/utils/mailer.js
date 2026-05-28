@@ -15,13 +15,11 @@ const parseSender = () => {
   if (match) {
     return { name: match[1].trim(), email: match[2].trim() };
   }
-  // Fallback: use SMTP_USER as sender email
   return { name: 'DriveEasy', email: process.env.SMTP_USER || 'noreply@driveeasy.com' };
 };
 
 const emailConfigured = !!BREVO_API_KEY;
 
-// Log configuration status on startup
 logger.info('[MAILER INIT] Checking Brevo HTTP API configuration...');
 logger.info(`  - BREVO_API_KEY: ${BREVO_API_KEY ? BREVO_API_KEY.substring(0, 12) + '...' : '❌ NOT SET'}`);
 logger.info(`  - SMTP_FROM: ${process.env.SMTP_FROM || '❌ NOT SET'}`);
@@ -33,12 +31,6 @@ if (!emailConfigured) {
   logger.warn('[MAILER] Set BREVO_API_KEY in your Render environment variables.');
 }
 
-/**
- * Send an email via Brevo's HTTP Transactional Email API.
- * Endpoint: POST https://api.brevo.com/v3/smtp/email
- * 
- * This bypasses SMTP port restrictions on Render by using HTTPS (port 443).
- */
 const sendMailAsync = async (options, maxRetries = 3) => {
   logger.info(`[MAILER] Initiating email send to: ${options.to} (Subject: "${options.subject}")`);
 
@@ -75,7 +67,6 @@ const sendMailAsync = async (options, maxRetries = 3) => {
         return true;
       }
 
-      // Brevo returned an error response
       throw new Error(`Brevo API ${response.status}: ${data.message || JSON.stringify(data)}`);
     } catch (err) {
       attempt++;
@@ -86,7 +77,6 @@ const sendMailAsync = async (options, maxRetries = 3) => {
         throw err;
       }
 
-      // Exponential backoff (2s, 4s, 8s...)
       await new Promise((resolve) => setTimeout(resolve, Math.pow(2, attempt) * 1000));
     }
   }
@@ -229,6 +219,40 @@ const sendPasswordReset = async (userEmail, token) => {
   return sendMailAsync({ to: userEmail, subject: 'DriveEasy: Password Reset Request', html: wrapHtml(content) });
 };
 
+const sendBookingCancellation = async (userEmail, bookingDetails) => {
+  const carName = bookingDetails?.car ? `${bookingDetails.car.brand} ${bookingDetails.car.name}` : 'your car';
+  const start = bookingDetails?.startDate ? new Date(bookingDetails.startDate).toDateString() : '—';
+  const end = bookingDetails?.endDate ? new Date(bookingDetails.endDate).toDateString() : '—';
+  const originalCost = bookingDetails?.totalCost ?? 0;
+  const refundAmount = bookingDetails?.refundAmount ?? 0;
+  const refundStatus = bookingDetails?.refundStatus ?? 'not_requested';
+  
+  let refundMessage = '';
+  if (refundStatus === 'processed') {
+    refundMessage = `<p style="font-size: 1.1em;">A refund of <strong>₹${refundAmount}</strong> has been processed to your original payment method.</p>`;
+  } else if (refundStatus === 'pending') {
+    refundMessage = `<p style="font-size: 1.1em;">A refund of <strong>₹${refundAmount}</strong> is being processed.</p>`;
+  } else if (refundAmount === 0) {
+    refundMessage = `<p style="font-size: 1.1em;">No refund is applicable as per our cancellation policy.</p>`;
+  } else {
+    refundMessage = `<p style="font-size: 1.1em;">No refund was requested for this cancellation.</p>`;
+  }
+
+  const content = `
+    <h2 style="color: #dc2626;">Booking Cancelled 🚫</h2>
+    <p>Your booking has been successfully cancelled.</p>
+    <table class="table">
+      <tr><td class="label">Vehicle</td><td class="value">${carName}</td></tr>
+      <tr><td class="label">Original Dates</td><td class="value">${start} → ${end}</td></tr>
+      <tr><td class="label">Original Amount</td><td class="value">₹${originalCost}</td></tr>
+      <tr><td class="label">Cancellation Policy</td><td class="value" style="font-size: 0.9em;">>24h: 100% · 6-24h: 50% · &lt;6h: 0%</td></tr>
+    </table>
+    ${refundMessage}
+    <p style="font-size: 0.9em; color: #6b7280; margin-top: 10px;">Please allow 3-5 business days for refunds to reflect in your account.</p>
+  `;
+  return sendMailAsync({ to: userEmail, subject: 'DriveEasy: Booking Cancelled', html: wrapHtml(content) });
+};
+
 const sendAdminNotification = async (adminEmail, title, message) => {
   logger.info(`[MAILER] Preparing admin notification email for ${adminEmail}`);
   const content = `
@@ -256,6 +280,7 @@ module.exports = {
   sendRefundNotification,
   sendEmailVerification,
   sendPasswordReset,
+  sendBookingCancellation,
   sendAdminNotification,
   getMailerHealth,
   sendMailAsync
