@@ -82,7 +82,7 @@ model Branch {
   longitude     Float
   contactNumber String
   createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  updatedAt     DateTime @default(now())
 
   isDeleted     Boolean  @default(false)
 
@@ -102,7 +102,8 @@ model Booking {
   totalCost       Float
   status          String    @default("confirmed")
   paymentStatus   String?   @default("pending")
-  stripeIntentId  String?   
+  stripeIntentId  String?   @unique
+  idempotencyKey  String?   @unique
   cancellationReason String? 
   cancelledAt     DateTime?
   refundAmount    Float?
@@ -120,6 +121,7 @@ model Booking {
   @@index([paymentStatus])
   @@index([startDate, endDate])
   @@index([isDeleted])
+  @@index([userId, carId])
   @@map("bookings")
 }
 

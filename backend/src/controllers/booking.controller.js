@@ -1,7 +1,16 @@
 const { prisma } = require('../config/database');
-const { sendBookingCancellation } = require('../utils/mailer');
+const { sendBookingConfirmation } = require('../utils/mailer');
 
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY || 'sk_test_placeholder');
+
+/**
+ * Generate idempotency key from booking parameters
+ * Format: userId_carId_startDate (normalized to prevent timezone issues)
+ */
+const generateIdempotencyKey = (userId, carId, startDate) => {
+  const normalizedDate = new Date(startDate).toISOString().split('T')[0]; // YYYY-MM-DD
+  return `${userId}_${carId}_${normalizedDate}`;
+};
 
 /**
  * Calculate refund amount based on time before booking starts
@@ -34,17 +43,15 @@ const processStripeRefund = async (paymentIntentId, refundAmount) => {
       return { refundId: null, status: 'skipped' };
     }
     
-    // Get payment intent to verify it exists and is captured
     const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
     
     if (intent.status !== 'succeeded') {
       return { refundId: null, status: 'failed' };
     }
     
-    // Create refund
     const refund = await stripe.refunds.create({
       payment_intent: paymentIntentId,
-      amount: Math.round(refundAmount * 100), // Convert to cents
+      amount: Math.round(refundAmount * 100),
     });
     
     return { refundId: refund.id, status: 'processed' };
@@ -65,12 +72,18 @@ const createBooking = async (req, res, next) => {
     const endDate = req.body.end_date;
     const paymentIntentId = req.body.payment_intent_id;
 
+    // Validate required fields
     if (!carId || !startDate || !endDate || !paymentIntentId) {
-      return res.status(400).json({ success: false, message: 'Missing required fields (car_id, start_date, end_date, payment_intent_id)' });
+      return res.status(400).json({ 
+        success: false, 
+        error: 'MISSING_FIELDS',
+        message: 'Missing required fields (car_id, start_date, end_date, payment_intent_id)' 
+      });
     }
 
-    // Idempotency check
-    const existingBooking = await prisma.booking.findFirst({
+// ==================== LAYER 1: Payment Intent Idempotency Check ====================
+    // Check if booking already exists with this payment intent (prevents webhook + API duplicate)
+    const existingByPaymentIntent = await prisma.booking.findFirst({
       where: { stripeIntentId: paymentIntentId },
       include: {
         car: { select: { name: true, brand: true, pricePerDay: true } },
@@ -78,20 +91,51 @@ const createBooking = async (req, res, next) => {
       },
     });
 
-    if (existingBooking) {
-      console.log(`[BOOKING DEBUG] Returning existing booking via idempotency check: ${existingBooking.id}`);
+    if (existingByPaymentIntent) {
+      console.log(`[BOOKING DEBUG] Returning existing booking via paymentIntent check: ${existingByPaymentIntent.id}`);
       return res.status(200).json({
         success: true,
-        message: 'Booking retrieved successfully',
-        data: existingBooking,
+        message: 'Booking already exists for this payment',
+        data: existingByPaymentIntent,
       });
     }
 
-    const driverDoc = await prisma.driverDocument.findUnique({ where: { userId } });
-    if (!driverDoc || driverDoc.verificationStatus !== 'approved') {
-      return res.status(403).json({ success: false, error: 'FORBIDDEN', message: 'Driving license verification is required before booking' });
+// ==================== LAYER 2: Duplicate Booking Check ====================
+    // Check if user already has a confirmed booking for same car + dates
+    const existingByDates = await prisma.booking.findFirst({
+      where: {
+        userId,
+        carId,
+        status: { in: ['confirmed', 'active'] },
+        startDate: new Date(startDate),
+        endDate: new Date(endDate),
+      },
+      include: {
+        car: { select: { name: true, brand: true, pricePerDay: true } },
+        user: { select: { name: true, email: true } },
+      },
+    });
+
+    if (existingByDates) {
+      console.log(`[BOOKING DEBUG] Returning existing booking via duplicate check: ${existingByDates.id}`);
+      return res.status(200).json({
+        success: true,
+        message: 'You already have a booking for this car on these dates',
+        data: existingByDates,
+      });
     }
 
+// ==================== LAYER 3: Driver Verification Check ====================
+    const driverDoc = await prisma.driverDocument.findUnique({ where: { userId } });
+    if (!driverDoc || driverDoc.verificationStatus !== 'approved') {
+      return res.status(403).json({ 
+        success: false, 
+        error: 'FORBIDDEN', 
+        message: 'Driving license verification is required before booking' 
+      });
+    }
+
+// ==================== Date Validations ====================
     const start = new Date(startDate);
     const end = new Date(endDate);
     const now = new Date();
@@ -112,14 +156,24 @@ const createBooking = async (req, res, next) => {
       });
     }
 
+// ==================== Car Availability Check ====================
     const car = await prisma.car.findUnique({ where: { id: carId } });
     if (!car) {
-      return res.status(404).json({ success: false, error: 'NOT_FOUND', message: 'Car not found' });
+      return res.status(404).json({ 
+        success: false, 
+        error: 'NOT_FOUND', 
+        message: 'Car not found' 
+      });
     }
     if (!car.availability) {
-      return res.status(409).json({ success: false, error: 'UNAVAILABLE', message: 'This car is currently not in service' });
+      return res.status(409).json({ 
+        success: false, 
+        error: 'UNAVAILABLE', 
+        message: 'This car is currently not in service' 
+      });
     }
 
+// ==================== Date Overlap Check (Race Condition Safety) ====================
     const overlap = await prisma.booking.findFirst({
       where: {
         carId,
@@ -137,9 +191,11 @@ const createBooking = async (req, res, next) => {
       });
     }
 
+// ==================== Calculate Cost ====================
     const days = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1);
     const totalCost = parseFloat(car.pricePerDay) * days;
 
+// ==================== Verify Payment Status ====================
     let paymentStatus = 'pending';
     let retries = 0;
     const maxRetries = 5;
@@ -163,14 +219,39 @@ const createBooking = async (req, res, next) => {
             paymentStatus = 'pending';
           }
         } else if (intent.status === 'canceled') {
-          return res.status(400).json({ success: false, message: `Payment was cancelled` });
+          return res.status(400).json({ 
+            success: false, 
+            error: 'PAYMENT_CANCELLED',
+            message: 'Payment was cancelled' 
+          });
         }
       } catch (err) {
-        return res.status(400).json({ success: false, message: 'Invalid payment intent ID' });
+        return res.status(400).json({ 
+          success: false, 
+          error: 'INVALID_PAYMENT_INTENT',
+          message: 'Invalid payment intent ID' 
+        });
       }
     }
 
+// ==================== ATOMIC BOOKING CREATION WITH IDEMPOTENCY KEY ====================
+    const idempotencyKey = generateIdempotencyKey(userId, carId, startDate);
+
     const booking = await prisma.$transaction(async (tx) => {
+      // Double-check inside transaction for race condition safety
+      const existingInTx = await tx.booking.findFirst({
+        where: {
+          OR: [
+            { stripeIntentId: paymentIntentId },
+            { idempotencyKey },
+          ],
+        },
+      });
+
+      if (existingInTx) {
+        return existingInTx; // Return existing booking
+      }
+
       const newBooking = await tx.booking.create({
         data: { 
           userId, 
@@ -180,19 +261,32 @@ const createBooking = async (req, res, next) => {
           totalCost, 
           status: 'confirmed', 
           paymentStatus, 
-          stripeIntentId: paymentIntentId 
+          stripeIntentId: paymentIntentId,
+          idempotencyKey,
         },
         include: {
           car: { select: { name: true, brand: true, pricePerDay: true } },
           user: { select: { name: true, email: true } },
         },
       });
+      
       return newBooking;
     });
 
+// ==================== Handle Webhook Race Condition ====================
+    // If we returned an existing booking from transaction
+    if (booking.stripeIntentId === paymentIntentId) {
+      console.log(`[BOOKING DEBUG] Booking created via atomic transaction: ${booking.id}`);
+      sendBookingConfirmation(booking.user.email, booking);
+    }
+
+// ==================== Update Stripe Metadata ====================
     try {
       await stripe.paymentIntents.update(paymentIntentId, {
-        metadata: { bookingId: booking.id }
+        metadata: { 
+          bookingId: booking.id,
+          idempotencyKey,
+        }
       });
     } catch (err) {
       console.error('[BOOKING] Failed to update payment intent metadata:', err.message);
@@ -249,11 +343,19 @@ const getBookingById = async (req, res, next) => {
     });
 
     if (!booking) {
-      return res.status(404).json({ success: false, error: 'NOT_FOUND', message: 'Booking not found' });
+      return res.status(404).json({ 
+        success: false, 
+        error: 'NOT_FOUND', 
+        message: 'Booking not found' 
+      });
     }
 
     if (req.user.role !== 'admin' && booking.userId !== req.user.id) {
-      return res.status(403).json({ success: false, error: 'FORBIDDEN', message: 'Access denied' });
+      return res.status(403).json({ 
+        success: false, 
+        error: 'FORBIDDEN', 
+        message: 'Access denied' 
+      });
     }
 
     res.json({ success: true, data: booking });
@@ -272,16 +374,27 @@ const cancelBooking = async (req, res, next) => {
     });
 
     if (!booking) {
-      return res.status(404).json({ success: false, error: 'NOT_FOUND', message: 'Booking not found' });
+      return res.status(404).json({ 
+        success: false, 
+        error: 'NOT_FOUND', 
+        message: 'Booking not found' 
+      });
     }
     if (req.user.role !== 'admin' && booking.userId !== req.user.id) {
-      return res.status(403).json({ success: false, error: 'FORBIDDEN', message: 'Access denied' });
+      return res.status(403).json({ 
+        success: false, 
+        error: 'FORBIDDEN', 
+        message: 'Access denied' 
+      });
     }
     if (booking.status === 'cancelled') {
-      return res.status(400).json({ success: false, error: 'ALREADY_CANCELLED', message: 'Booking is already cancelled' });
+      return res.status(400).json({ 
+        success: false, 
+        error: 'ALREADY_CANCELLED', 
+        message: 'Booking is already cancelled' 
+      });
     }
 
-    // Prevent cancellation after booking start time
     const now = new Date();
     if (booking.startDate <= now) {
       return res.status(400).json({ 
@@ -291,10 +404,8 @@ const cancelBooking = async (req, res, next) => {
       });
     }
 
-    // Calculate refund amount
     const refundAmount = calculateRefund(booking.startDate, booking.totalCost || 0);
     
-    // Prepare refund if payment exists
     let refundStatus = 'not_requested';
     let refundId = null;
     
@@ -303,7 +414,6 @@ const cancelBooking = async (req, res, next) => {
     }
 
     const updated = await prisma.$transaction(async (tx) => {
-      // Update booking with cancellation details
       const cancelled = await tx.booking.update({
         where: { id: req.params.id },
         data: { 
@@ -315,7 +425,6 @@ const cancelBooking = async (req, res, next) => {
         },
       });
 
-      // Create audit log for admin actions
       if (req.user.role === 'admin') {
         await tx.auditLog.create({
           data: {
@@ -331,13 +440,11 @@ const cancelBooking = async (req, res, next) => {
       return cancelled;
     });
 
-    // Process refund asynchronously (outside transaction)
     if (booking.stripeIntentId && booking.paymentStatus === 'paid' && refundAmount > 0) {
       setImmediate(async () => {
         try {
           const result = await processStripeRefund(booking.stripeIntentId, refundAmount);
           
-          // Update refund status
           await prisma.booking.update({
             where: { id: req.params.id },
             data: {
@@ -346,7 +453,6 @@ const cancelBooking = async (req, res, next) => {
             },
           });
 
-          // Send cancellation email
           sendBookingCancellation(booking.user.email, {
             ...booking,
             refundAmount,
@@ -357,7 +463,6 @@ const cancelBooking = async (req, res, next) => {
         }
       });
     } else {
-      // Still send cancellation email for no-refund scenarios
       sendBookingCancellation(booking.user.email, {
         ...booking,
         refundAmount,
@@ -422,4 +527,30 @@ const getBookedDates = async (req, res, next) => {
   }
 };
 
-module.exports = { createBooking, getBookings, getBookingById, cancelBooking, getBookedDates };
+// ==================== BONUS: Handle payment success but booking fails ====================
+const handleFailedBookingRecovery = async (paymentIntentId) => {
+  // This can be called by cron job or admin to handle orphaned payments
+  const existing = await prisma.booking.findFirst({
+    where: { stripeIntentId: paymentIntentId },
+  });
+  
+  if (!existing) {
+    // Payment exists but no booking - initiate refund
+    const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
+    if (intent.status === 'succeeded') {
+      await stripe.refunds.create({
+        payment_intent: paymentIntentId,
+        amount: intent.amount,
+      });
+    }
+  }
+};
+
+module.exports = { 
+  createBooking, 
+  getBookings, 
+  getBookingById, 
+  cancelBooking, 
+  getBookedDates,
+  handleFailedBookingRecovery,
+};
