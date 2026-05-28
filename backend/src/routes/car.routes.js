@@ -36,7 +36,7 @@ const carRules = {
     body('transmission').optional().trim().escape(),
     body('fuelType').optional().trim().escape(),
     body('description').optional().trim().escape(),
-    body('imageUrl').optional().trim().isURL().withMessage('Valid image URL is required'),
+    body('imageUrl').optional({ checkFalsy: true }).trim().isURL().withMessage('Valid image URL is required'),
   ],
 };
 

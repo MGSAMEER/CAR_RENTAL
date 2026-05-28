@@ -99,12 +99,12 @@ const createCar = async (req, res, next) => {
 // PUT /api/v1/cars/:id  [Admin]
 const updateCar = async (req, res, next) => {
   try {
-    const { name, brand, model, type, pricePerDay, availability, seats, transmission, fuelType, description, branchId } = req.body;
-    let { imageUrl } = req.body;
+    const { name, brand, model, type, pricePerDay, availability, seats, transmission, fuelType, description, branchId, imageUrl: newImageUrl } = req.body;
     
     const existingCar = await prisma.car.findUnique({ where: { id: req.params.id } });
     if (!existingCar) return res.status(404).json({ success: false, message: 'Car not found' });
 
+    let imageUrl = newImageUrl;
     if (req.file) {
       const { uploadToCloudinary, deleteFromCloudinary } = require('../utils/cloudinary');
       try {
@@ -120,22 +120,24 @@ const updateCar = async (req, res, next) => {
       }
     }
 
+    const updateData = {
+      ...(name !== undefined && { name }),
+      ...(brand !== undefined && { brand }),
+      ...(model !== undefined && { model }),
+      ...(type !== undefined && { type }),
+      ...(pricePerDay !== undefined && { pricePerDay: parseFloat(pricePerDay) }),
+      ...(availability !== undefined && { availability: availability === true || String(availability) === 'true' }),
+      ...(seats !== undefined && { seats: parseInt(seats) }),
+      ...(transmission !== undefined && { transmission }),
+      ...(fuelType !== undefined && { fuelType }),
+      ...(description !== undefined && { description }),
+      ...(imageUrl !== undefined && imageUrl !== '' && { imageUrl }),
+      ...(branchId !== undefined && { branchId: branchId || null }),
+    };
+
     const car = await prisma.car.update({
       where: { id: req.params.id },
-      data: {
-        ...(name !== undefined && { name }),
-        ...(brand !== undefined && { brand }),
-        ...(model !== undefined && { model }),
-        ...(type !== undefined && { type }),
-        ...(pricePerDay !== undefined && { pricePerDay: parseFloat(pricePerDay) }),
-        ...(availability !== undefined && { availability: String(availability) === 'true' }),
-        ...(seats !== undefined && { seats: parseInt(seats) }),
-        ...(transmission !== undefined && { transmission }),
-        ...(fuelType !== undefined && { fuelType }),
-        ...(description !== undefined && { description }),
-        ...(imageUrl !== undefined && { imageUrl }),
-        ...(branchId !== undefined && { branchId: branchId || null }),
-      },
+      data: updateData,
     });
 
     res.json({ success: true, message: 'Car updated successfully', data: car });
